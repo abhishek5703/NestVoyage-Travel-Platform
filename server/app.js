@@ -1,5 +1,6 @@
 require("dotenv").config();
 
+const mongoose = require("mongoose");
 const express = require("express");
 const session = require("express-session");
 const MongoStore = require("connect-mongo");
@@ -19,6 +20,37 @@ const aiRoutes = require("./routes/ai");
 const app = express();
 const dbUrl = process.env.ATLASDB_URL || process.env.MONGODB_URI;
 
+let mongoConnectionPromise = null;
+
+async function connectMongo() {
+  if (!dbUrl) {
+    throw new Error("ATLASDB_URL or MONGODB_URI is missing.");
+  }
+
+  // Already connected
+  if (mongoose.connection.readyState === 1) {
+    return;
+  }
+
+  // Connection already in progress
+  if (!mongoConnectionPromise) {
+    mongoConnectionPromise = mongoose
+      .connect(dbUrl, {
+        serverSelectionTimeoutMS: 10000
+      })
+      .catch(err => {
+        mongoConnectionPromise = null;
+        throw err;
+      });
+  }
+
+  await mongoConnectionPromise;
+}
+
+mongoose.connection.on("disconnected", () => {
+  mongoConnectionPromise = null;
+});
+
 app.set("trust proxy", 1);
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 app.use(cors({
@@ -27,6 +59,16 @@ app.use(cors({
 }));
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
+
+app.use(async (req, res, next) => {
+  try {
+    await connectMongo();
+    next();
+  } catch (err) {
+    console.error("MongoDB connection error:", err);
+    next(err);
+  }
+});
 
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: "draft-7", legacyHeaders: false }));
 
