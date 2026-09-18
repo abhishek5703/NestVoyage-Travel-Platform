@@ -4,30 +4,6 @@ const fs = require("fs");
 
 let firebaseApp = null;
 
-function normalizePrivateKey(value) {
-  let key = String(value || "").trim();
-
-  // Remove accidental surrounding quotes.
-  if (
-    key.startsWith('"') &&
-    key.endsWith('"')
-  ) {
-    key = key.slice(1, -1);
-  }
-
-  if (
-    key.startsWith("'") &&
-    key.endsWith("'")
-  ) {
-    key = key.slice(1, -1);
-  }
-
-  // Convert escaped newlines from Vercel env into real newlines.
-  key = key.replace(/\\n/g, "\n");
-
-  return key;
-}
-
 function getFirebaseAuth() {
   if (firebaseApp) {
     return firebaseApp.auth();
@@ -41,57 +17,47 @@ function getFirebaseAuth() {
     "firebase-service-account.json"
   );
 
-  // Local development.
+  // Local development
   if (fs.existsSync(serviceAccountPath)) {
     serviceAccount = JSON.parse(
-      fs.readFileSync(
-        serviceAccountPath,
-        "utf8"
-      )
+      fs.readFileSync(serviceAccountPath, "utf8")
     );
   } else {
-    // Production / Vercel.
-    const projectId =
-      process.env.FIREBASE_PROJECT_ID;
+    // Production / Vercel
+    const encoded = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
 
-    const clientEmail =
-      process.env.FIREBASE_CLIENT_EMAIL;
-
-    const privateKey =
-      normalizePrivateKey(
-        process.env.FIREBASE_PRIVATE_KEY
-      );
-
-    if (
-      !projectId ||
-      !clientEmail ||
-      !privateKey
-    ) {
+    if (!encoded) {
       throw new Error(
-        "Firebase Admin credentials are not configured."
+        "FIREBASE_SERVICE_ACCOUNT_BASE64 is missing."
       );
     }
 
-    if (
-      !privateKey.includes(
-        "-----BEGIN PRIVATE KEY-----"
-      )
-    ) {
+    try {
+      const json = Buffer.from(
+        encoded,
+        "base64"
+      ).toString("utf8");
+
+      serviceAccount = JSON.parse(json);
+    } catch (err) {
       throw new Error(
-        "FIREBASE_PRIVATE_KEY is not a valid PEM private key."
+        `Invalid Firebase service account: ${err.message}`
       );
     }
+  }
 
-    serviceAccount = {
-      project_id: projectId,
-      client_email: clientEmail,
-      private_key: privateKey
-    };
+  if (
+    !serviceAccount.project_id ||
+    !serviceAccount.client_email ||
+    !serviceAccount.private_key
+  ) {
+    throw new Error(
+      "Firebase service account is missing project_id, client_email or private_key."
+    );
   }
 
   firebaseApp = admin.initializeApp({
-    credential:
-      admin.credential.cert(serviceAccount)
+    credential: admin.credential.cert(serviceAccount)
   });
 
   return firebaseApp.auth();
