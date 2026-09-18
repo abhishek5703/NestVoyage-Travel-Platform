@@ -1,7 +1,7 @@
 require("dotenv").config();
 
-const mongoose = require("mongoose");
 const express = require("express");
+const connectDB = require("./config/db");
 const session = require("express-session");
 const MongoStore = require("connect-mongo");
 const passport = require("passport");
@@ -20,36 +20,7 @@ const aiRoutes = require("./routes/ai");
 const app = express();
 const dbUrl = process.env.ATLASDB_URL || process.env.MONGODB_URI;
 
-let mongoConnectionPromise = null;
 
-async function connectMongo() {
-  if (!dbUrl) {
-    throw new Error("ATLASDB_URL or MONGODB_URI is missing.");
-  }
-
-  // Already connected
-  if (mongoose.connection.readyState === 1) {
-    return;
-  }
-
-  // Connection already in progress
-  if (!mongoConnectionPromise) {
-    mongoConnectionPromise = mongoose
-      .connect(dbUrl, {
-        serverSelectionTimeoutMS: 10000
-      })
-      .catch(err => {
-        mongoConnectionPromise = null;
-        throw err;
-      });
-  }
-
-  await mongoConnectionPromise;
-}
-
-mongoose.connection.on("disconnected", () => {
-  mongoConnectionPromise = null;
-});
 
 app.set("trust proxy", 1);
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
@@ -62,10 +33,13 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use(async (req, res, next) => {
   try {
-    await connectMongo();
+    await connectDB();
     next();
   } catch (err) {
-    console.error("MongoDB connection error:", err);
+    console.error(
+      "MongoDB connection error:",
+      err.message
+    );
     next(err);
   }
 });
@@ -94,11 +68,11 @@ if (sessionSecret.length < 32) {
  */
 const store = dbUrl
   ? MongoStore.create({
-      mongoUrl: dbUrl,
-      collectionName: "nestvoyage_sessions_v6",
-      stringify: false,
-      touchAfter: 24 * 3600
-    })
+    mongoUrl: dbUrl,
+    collectionName: "nestvoyage_sessions_v6",
+    stringify: false,
+    touchAfter: 24 * 3600
+  })
   : null;
 
 const sessionOptions = {
