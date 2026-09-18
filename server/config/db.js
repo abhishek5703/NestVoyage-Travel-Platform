@@ -1,15 +1,14 @@
 const mongoose = require("mongoose");
 
-// Prevent Mongoose from silently queueing database operations
-// when a connection is unavailable.
+// Do not let queries silently sit in Mongoose's buffer.
+// If the connection is unavailable, fail at the connection layer.
 mongoose.set("bufferCommands", false);
 
-const cached =
-  global.__nestVoyageMongo || {
+const cache =
+  global.__nestVoyageMongo ||
+  (global.__nestVoyageMongo = {
     promise: null
-  };
-
-global.__nestVoyageMongo = cached;
+  });
 
 async function connectDB() {
   const uri =
@@ -22,25 +21,22 @@ async function connectDB() {
     );
   }
 
-  // Reuse an existing connection inside a warm Vercel instance.
   if (mongoose.connection.readyState === 1) {
     return mongoose.connection;
   }
 
-  // Reuse an in-progress connection.
-  if (!cached.promise) {
-    cached.promise = mongoose
+  if (!cache.promise) {
+    cache.promise = mongoose
       .connect(uri, {
         serverSelectionTimeoutMS: 10000,
-        maxPoolSize: 10,
-        bufferCommands: false
+        maxPoolSize: 10
       })
       .then(() => {
         console.log("MongoDB connected");
         return mongoose.connection;
       })
       .catch(err => {
-        cached.promise = null;
+        cache.promise = null;
         console.error(
           "MongoDB connection failed:",
           err.message
@@ -49,30 +45,19 @@ async function connectDB() {
       });
   }
 
-  try {
-    return await cached.promise;
-  } catch (err) {
-    cached.promise = null;
-    throw err;
-  }
+  return cache.promise;
 }
 
-mongoose.connection.on(
-  "disconnected",
-  () => {
-    cached.promise = null;
-    console.error("MongoDB disconnected");
-  }
-);
+mongoose.connection.on("disconnected", () => {
+  cache.promise = null;
+  console.error("MongoDB disconnected");
+});
 
-mongoose.connection.on(
-  "error",
-  err => {
-    console.error(
-      "MongoDB error:",
-      err.message
-    );
-  }
-);
+mongoose.connection.on("error", err => {
+  console.error(
+    "MongoDB error:",
+    err.message
+  );
+});
 
 module.exports = connectDB;

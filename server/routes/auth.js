@@ -67,60 +67,163 @@ router.post("/firebase/signup", async (req, res, next) => {
   }
 });
 
-router.post("/firebase/session", async (req, res, next) => {
-  try {
-    const { idToken } = req.body;
-    if (!idToken) return res.status(400).json({ message: "Firebase ID token is required." });
+router.post(
+  "/firebase/session",
+  async (req, res, next) => {
+    try {
+      const { idToken } = req.body;
 
-    const decoded = await getFirebaseAuth().verifyIdToken(idToken);
-    const email = decoded.email?.toLowerCase().trim();
-
-    if (!decoded.email_verified) {
-      return res.status(403).json({
-        message: "Please verify your email address before logging in."
-      });
-    }
-
-    let user = await User.findOne({ firebaseUid: decoded.uid });
-
-    if (!user && email) {
-      user = await User.findOne({ email });
-      if (user) {
-        user.firebaseUid = decoded.uid;
-        user.authProvider = user.authProvider === "local" ? "hybrid" : "firebase";
-        await user.save();
-      }
-    }
-
-    if (!user) {
-      const fallbackUsername = (decoded.name || email?.split("@")[0] || `traveler_${decoded.uid.slice(0, 8)}`)
-        .replace(/[^a-zA-Z0-9_]/g, "")
-        .slice(0, 32) || `traveler_${decoded.uid.slice(0, 8)}`;
-
-      let username = fallbackUsername;
-      let suffix = 1;
-      while (await User.exists({ username })) {
-        username = `${fallbackUsername.slice(0, 26)}_${suffix++}`;
+      if (!idToken) {
+        return res.status(400).json({
+          message:
+            "Firebase ID token is required."
+        });
       }
 
-      user = await User.create({
-        username,
-        email,
-        firebaseUid: decoded.uid,
-        authProvider: "firebase"
-      });
+      let decoded;
+
+      try {
+        decoded =
+          await getFirebaseAuth()
+            .verifyIdToken(idToken);
+      } catch (err) {
+        console.error(
+          "[Firebase Session] Token verification failed:",
+          {
+            code: err?.code,
+            message: err?.message
+          }
+        );
+
+        const invalidTokenCodes = new Set([
+          "auth/argument-error",
+          "auth/invalid-id-token",
+          "auth/id-token-expired",
+          "auth/id-token-revoked"
+        ]);
+
+        if (
+          invalidTokenCodes.has(err?.code)
+        ) {
+          return res.status(401).json({
+            message:
+              "Firebase sign-in token is invalid or expired."
+          });
+        }
+
+        return res.status(503).json({
+          message:
+            "Firebase authentication service is not configured correctly."
+        });
+      }
+
+      const email =
+        decoded.email
+          ?.toLowerCase()
+          .trim();
+
+      if (!decoded.email_verified) {
+        return res.status(403).json({
+          message:
+            "Please verify your email address before logging in."
+        });
+      }
+
+      let user =
+        await User.findOne({
+          firebaseUid: decoded.uid
+        });
+
+      if (!user && email) {
+        user =
+          await User.findOne({ email });
+
+        if (user) {
+          user.firebaseUid =
+            decoded.uid;
+
+          user.authProvider =
+            user.authProvider === "local"
+              ? "hybrid"
+              : "firebase";
+
+          await user.save();
+        }
+      }
+
+      if (!user) {
+        const fallbackUsername =
+          (
+            decoded.name ||
+            email?.split("@")[0] ||
+            `traveler_${decoded.uid.slice(
+              0,
+              8
+            )}`
+          )
+            .replace(
+              /[^a-zA-Z0-9_]/g,
+              ""
+            )
+            .slice(0, 32) ||
+          `traveler_${decoded.uid.slice(
+            0,
+            8
+          )}`;
+
+        let username =
+          fallbackUsername;
+
+        let suffix = 1;
+
+        while (
+          await User.exists({
+            username
+          })
+        ) {
+          username =
+            `${fallbackUsername.slice(
+              0,
+              26
+            )}_${suffix++}`;
+        }
+
+        user = await User.create({
+          username,
+          email,
+          firebaseUid:
+            decoded.uid,
+          authProvider: "firebase"
+        });
+      }
+
+      await new Promise(
+        (resolve, reject) => {
+          req.login(
+            user,
+            err =>
+              err
+                ? reject(err)
+                : resolve()
+          );
+        }
+      );
+
+      return res.json({ user });
+    } catch (err) {
+      console.error(
+        "[Firebase Session] Database/session failure:",
+        {
+          name: err?.name,
+          code: err?.code,
+          message: err?.message
+        }
+      );
+
+      next(err);
     }
-
-    await new Promise((resolve, reject) => {
-      req.login(user, err => (err ? reject(err) : resolve()));
-    });
-
-    res.json({ user });
-  } catch (err) {
-    next(err);
   }
-});
-
+);
 router.post("/login", async (req, res, next) => {
   try {
     const identifier = String(req.body.identifier || req.body.username || "").trim();

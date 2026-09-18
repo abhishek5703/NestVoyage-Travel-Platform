@@ -5,7 +5,6 @@ const connectDB = require("./config/db");
 
 const PORT = process.env.PORT || 5000;
 
-// Local development only.
 if (require.main === module) {
   connectDB()
     .then(() => {
@@ -18,11 +17,10 @@ if (require.main === module) {
     .catch(err => {
       console.error(
         "Startup failed:",
-        err
+        err.message
       );
       process.exit(1);
     });
 }
 
-// Vercel uses the exported Express app.
 module.exports = app;

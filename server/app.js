@@ -1,7 +1,8 @@
 require("dotenv").config();
 
-const express = require("express");
 const connectDB = require("./config/db");
+
+const express = require("express");
 const session = require("express-session");
 const MongoStore = require("connect-mongo");
 const passport = require("passport");
@@ -9,6 +10,7 @@ const LocalStrategy = require("passport-local");
 const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
+
 const User = require("./models/user");
 const authRoutes = require("./routes/auth");
 const listingRoutes = require("./routes/listings");
